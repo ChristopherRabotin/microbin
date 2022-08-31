@@ -1,5 +1,5 @@
 # latest rust will be used to build the binary
-FROM rust:latest as builder
+FROM rust:slim-buster as builder
 
 # the temporary directory where we build
 WORKDIR /usr/src/microbin
@@ -20,4 +20,4 @@ WORKDIR /usr/local/bin
 COPY --from=builder /usr/src/microbin/target/release/microbin /usr/local/bin/microbin
 
 # run the binary
-CMD ["microbin"]
+CMD ["microbin", "--editable", "--highlightsyntax", "--title", "Nyx Pastebin"]
