@@ -1,6 +1,7 @@
 use crate::dbio::save_to_file;
 use crate::pasta::PastaFile;
 use crate::util::animalnumbers::to_animal_names;
+use crate::util::hashids::to_hashids;
 use crate::util::misc::is_valid_url;
 use crate::{AppState, Pasta, ARGS};
 use actix_multipart::Multipart;
@@ -26,13 +27,35 @@ pub async fn index() -> impl Responder {
         .body(IndexTemplate { args: &ARGS }.render().unwrap())
 }
 
+pub fn expiration_to_timestamp(expiration: &str, timenow: i64) -> i64 {
+    match expiration {
+        "1min" => timenow + 60,
+        "10min" => timenow + 60 * 10,
+        "1hour" => timenow + 60 * 60,
+        "24hour" => timenow + 60 * 60 * 24,
+        "3days" => timenow + 60 * 60 * 24 * 3,
+        "1week" => timenow + 60 * 60 * 24 * 7,
+        "never" => {
+            if ARGS.no_eternal_pasta {
+                timenow + 60 * 60 * 24 * 7
+            } else {
+                0
+            }
+        }
+        _ => {
+            log::error!("{}", "Unexpected expiration time!");
+            timenow + 60 * 60 * 24 * 7
+        }
+    }
+}
+
 pub async fn create(
     data: web::Data<AppState>,
     mut payload: Multipart,
 ) -> Result<HttpResponse, Error> {
     if ARGS.readonly {
         return Ok(HttpResponse::Found()
-            .append_header(("Location", "/"))
+            .append_header(("Location", format!("{}/", ARGS.public_path)))
             .finish());
     }
 
@@ -54,8 +77,11 @@ pub async fn create(
         private: false,
         editable: false,
         created: timenow,
+        read_count: 0,
+        burn_after_reads: 0,
+        last_read: timenow,
         pasta_type: String::from(""),
-        expiration: 0,
+        expiration: expiration_to_timestamp(&ARGS.default_expiry, timenow),
     };
 
     while let Some(mut field) = payload.try_next().await? {
@@ -72,15 +98,23 @@ pub async fn create(
             }
             "expiration" => {
                 while let Some(chunk) = field.try_next().await? {
-                    new_pasta.expiration = match std::str::from_utf8(&chunk).unwrap() {
-                        "1min" => timenow + 60,
-                        "10min" => timenow + 60 * 10,
-                        "1hour" => timenow + 60 * 60,
-                        "24hour" => timenow + 60 * 60 * 24,
-                        "1week" => timenow + 60 * 60 * 24 * 7,
-                        "never" => 0,
+                    new_pasta.expiration = expiration_to_timestamp(std::str::from_utf8(&chunk).unwrap(), timenow);
+                }
+
+                continue;
+            }
+            "burn_after" => {
+                while let Some(chunk) = field.try_next().await? {
+                    new_pasta.burn_after_reads = match std::str::from_utf8(&chunk).unwrap() {
+                        // give an extra read because the user will be redirected to the pasta page automatically
+                        "1" => 2,
+                        "10" => 10,
+                        "100" => 100,
+                        "1000" => 1000,
+                        "10000" => 10000,
+                        "0" => 0,
                         _ => {
-                            log::error!("{}", "Unexpected expiration time!");
+                            log::error!("{}", "Unexpected burn after value!");
                             0
                         }
                     };
@@ -89,8 +123,13 @@ pub async fn create(
                 continue;
             }
             "content" => {
+                let mut content = String::from("");
                 while let Some(chunk) = field.try_next().await? {
-                    new_pasta.content = std::str::from_utf8(&chunk).unwrap().to_string();
+                    content.push_str(std::str::from_utf8(&chunk).unwrap().to_string().as_str());
+                }
+                if !content.is_empty() {
+                    new_pasta.content = content;
+
                     new_pasta.pasta_type = if is_valid_url(new_pasta.content.as_str()) {
                         String::from("url")
                     } else {
@@ -106,6 +145,10 @@ pub async fn create(
                 continue;
             }
             "file" => {
+                if ARGS.no_file_upload {
+                    continue;
+                }
+
                 let path = field.content_disposition().get_filename();
 
                 let path = match path {
@@ -114,7 +157,7 @@ pub async fn create(
                     None => continue,
                 };
 
-                let mut file = match PastaFile::from_unsanitized(&path) {
+                let mut file = match PastaFile::from_unsanitized(path) {
                     Ok(f) => f,
                     Err(e) => {
                         warn!("Unsafe file name: {e:?}");
@@ -122,8 +165,11 @@ pub async fn create(
                     }
                 };
 
-                std::fs::create_dir_all(format!("./pasta_data/public/{}", &new_pasta.id_as_animals()))
-                    .unwrap();
+                std::fs::create_dir_all(format!(
+                    "./pasta_data/public/{}",
+                    &new_pasta.id_as_animals()
+                ))
+                .unwrap();
 
                 let filepath = format!(
                     "./pasta_data/public/{}/{}",
@@ -143,7 +189,9 @@ pub async fn create(
                 new_pasta.file = Some(file);
                 new_pasta.pasta_type = String::from("text");
             }
-            _ => {}
+            field => {
+                log::error!("Unexpected multipart field:  {}", field);
+            }
         }
     }
 
@@ -153,7 +201,12 @@ pub async fn create(
 
     save_to_file(&pastas);
 
+    let slug = if ARGS.hash_ids {
+        to_hashids(id)
+    } else {
+        to_animal_names(id)
+    };
     Ok(HttpResponse::Found()
-        .append_header(("Location", format!("/pasta/{}", to_animal_names(id))))
+        .append_header(("Location", format!("{}/pasta/{}", ARGS.public_path, slug)))
         .finish())
 }
