@@ -1,6 +1,6 @@
 [package]
 name = "microbin"
-version = "1.2.1"
+version = "2.0.0"
 edition = "2021"
 authors = ["Daniel Szabo <daniel.szabo99@outlook.com>"]
 license = "BSD-3-Clause"
@@ -36,6 +36,8 @@ rust-embed = "6.4.2"
 mime_guess = "2.0.4"
 harsh = "0.2"
 html-escape = "0.2.13"
+magic-crypt = "3.1.12"
+rusqlite = { version = "0.29.0", features = ["bundled"] }
 
 [profile.release]
 lto = true

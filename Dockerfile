@@ -2,12 +2,14 @@ FROM rust:latest as build
 
 WORKDIR /app
 
-COPY . .
-
 RUN \
   DEBIAN_FRONTEND=noninteractive \
   apt-get update &&\
-  apt-get -y install ca-certificates tzdata &&\
+  apt-get -y install ca-certificates tzdata
+
+COPY . .
+
+RUN \
   CARGO_NET_GIT_FETCH_WITH_CLI=true \
   cargo build --release
 
@@ -17,10 +19,12 @@ FROM bitnami/minideb:latest
 # microbin will be in /app
 WORKDIR /app
 
+RUN mkdir -p /usr/share/zoneinfo
+
 # copy time zone info
 COPY --from=build \
   /usr/share/zoneinfo \
-  /usr/share/zoneinfo
+  /usr/share/
 
 COPY --from=build \
   /etc/ssl/certs/ca-certificates.crt \
