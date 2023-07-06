@@ -6,4 +6,4 @@ services:
     env: rust
     repo: https://github.com/szabodanika/microbin.git
     buildCommand: cargo build --release
-    startCommand: ./target/release/microbin --editable --highlightsyntax --title "Nyx Pastebin"
+    startCommand: ./target/release/microbin --editable --highlightsyntax
